@@ -1,0 +1,11 @@
+[package]
+name = "boot"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[profile.release]
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = true
