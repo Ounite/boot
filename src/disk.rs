@@ -1,6 +1,5 @@
-use core::arch::asm;
-
-use crate::boot;
+use crate::control;
+use crate::control::is_cf_set;
 
 
 #[repr(packed)]
@@ -73,27 +72,51 @@ struct LBAAddressPacket {
 }
 
 
-pub fn read(addr: u64, blocks: u16, buffer: &mut [u8]) -> Result<(), ()> {
+pub enum DiskReadError {
+    ReadLess(u16),
+    BufferTooSmall,
+    BufferTooFarAway,
+    Other(u8)
+}
+
+
+pub fn read(addr: u64, blocks: u16, buffer: &mut [u8]) -> Result<(), DiskReadError> {
+    if buffer.len() < blocks as usize * 512 {
+        return Err(DiskReadError::BufferTooSmall);
+    };
+
     let mut packet = LBAAddressPacket {
         size: 16,
         _pad: 0x00,
         blocks_count: blocks,
-        buffer: (buffer.as_ptr() as usize).try_into().map_err(|_| ())?,
+        buffer: (buffer.as_ptr() as usize).try_into().map_err(|_| DiskReadError::BufferTooFarAway)?,
         mem_page: 0,
         lba_addr: addr,
     };
 
     unsafe {
-        asm!(
+        core::arch::asm!(
             "push si",
             "mov si, cx",
             "int 0x13",
             "pop si",
-            in("dl") unsafe { boot::BOOT_DISK_NUMBER },
+            in("dl") unsafe { control::BOOT_DISK_NUMBER },
             in("cx") &mut packet as *mut _ as u16,
             in("ah") 0x42_u8
         );
-    }
+    };
 
-    (packet.blocks_count == blocks).then_some(()).ok_or(())
+    let ah_value;
+    unsafe {
+        core::arch::asm!(
+            "mov {}, ah",
+            out(reg_byte) ah_value
+        );
+    };
+
+    if is_cf_set() {
+        return Err(DiskReadError::Other(ah_value));
+    };
+
+    (packet.blocks_count == blocks).then_some(()).ok_or(DiskReadError::ReadLess(packet.blocks_count))
 }
