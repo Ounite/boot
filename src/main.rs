@@ -17,24 +17,31 @@ const ENVZ_LOC_ADDR: usize = 0x7c00;
 extern "C" fn main() -> ! {
     let mbr_record = unsafe { &*(MBR_LOC_ADDR as *const disk::MBRRecord) };
 
-    let mut target_part = None;
-    for part in mbr_record.partitions.iter() {
-        if part.sys_id == ENVZ_PART_ID {
-            target_part = Some(part);
-            break;
-        };
-    };
+    let mut target_part = mbr_record.partitions.iter().find(|p| p.sys_id == ENVZ_PART_ID);
     
     if let Some(part) = target_part {
         disk::read(
-            part.start_lba_addr as u64, 
-            part.blocks_count.try_into().unwrap_or_else(|_| { text::print_string("ps"); unsafe { boot::abort() } }), 
-            unsafe { &mut*core::ptr::slice_from_raw_parts_mut(ENVZ_LOC_ADDR as *mut _, part.blocks_count as usize * 512) },
-        ).unwrap_or_else(|_| { text::print_string("pr"); unsafe { boot::abort() } });
+            part.start_lba_addr as u64,
+            part.blocks_count.try_into().unwrap_or_else(|_| abort("ps")),
+            unsafe { &mut*core::ptr::slice_from_raw_parts_mut(ENVZ_LOC_ADDR as *mut _, 492543) },
+        ).unwrap_or_else(|_| abort("pr"));
         
-        unsafe { boot::start_envz() }
+        let envz_entry = unsafe { core::mem::transmute::<_, extern "C" fn(u8) -> !>(ENVZ_LOC_ADDR as *const ()) };
+
+        unsafe {
+            core::arch::asm!(
+                "mov esp, 0x7c00",
+                "mov ebp, esp"
+            )
+        }
+        
+        envz_entry(unsafe { boot::BOOT_DISK_NUMBER })
     } else {
-        text::print_string("p");
-        unsafe { boot::abort() }
+        abort("p")
     }
+}
+
+pub fn abort(reason: &str) -> ! {
+    text::print_string(reason);
+    boot::stop()
 }
